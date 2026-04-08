@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "mlx-vision-mamba"
+version = "0.1.0"
+description = "Metal-accelerated Vision Mamba for Apple Silicon (2D/3D/4D)"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [{name = "Shinyoung Kang", email = "Shinyoung.kang.1@gmail.com"}]
+dependencies = ["mlx>=0.20"]
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USERNAME/mlx-vision-mamba"
