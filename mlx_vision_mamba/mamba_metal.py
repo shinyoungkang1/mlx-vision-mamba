@@ -250,42 +250,21 @@ def selective_scan_metal(x, delta, A, B, C, D):
 # Discretization happens in MLX (autograd-tracked), so the full chain rule
 # is: MLX autograd through discretization → Metal VJP through scan.
 
-# Cache for h_saved between forward and backward to avoid recomputation.
-# Key: id of the y output array. Cleared after backward use.
-_h_cache = {}
-
-
 @mx.custom_function
 def _metal_scan_core(deltaA, deltaBx, C, x, D):
-    """
-    Metal scan core on pre-discretized inputs.
-
-    Forward: Metal kernel with h saved for backward (cached).
-    VJP: Metal backward kernel using cached h_saved.
-    """
-    y, h_saved = _launch_fwd(deltaA, deltaBx, C, x, D, save_h=True)
-    # Cache h_saved keyed by the output y's id
-    _h_cache[id(y)] = h_saved
+    """Metal scan core on pre-discretized inputs."""
+    y, _h = _launch_fwd(deltaA, deltaBx, C, x, D, save_h=True)
     return y
 
 
 @_metal_scan_core.vjp
 def _metal_scan_core_vjp(primals, cotangent, output):
-    """
-    VJP for the Metal scan core.
-
-    Uses cached h_saved from forward pass — no recomputation needed.
-    """
+    """VJP for the Metal scan core. Recomputes h_saved (safe with multi-scan blocks)."""
     deltaA, deltaBx, C, x, D = primals
     dy = cotangent
 
-    # Try to get cached h_saved from forward pass
-    h_saved = _h_cache.pop(id(output), None)
-    if h_saved is None:
-        # Fallback: recompute if cache miss (shouldn't happen in normal training)
-        _, h_saved = _launch_fwd(deltaA, deltaBx, C, x, D, save_h=True)
+    _, h_saved = _launch_fwd(deltaA, deltaBx, C, x, D, save_h=True)
 
-    # Launch backward kernel
     ddeltaA, ddeltaBx, dC, dx, dD = _launch_bwd(
         deltaA, deltaBx, C, x, D, h_saved, dy
     )

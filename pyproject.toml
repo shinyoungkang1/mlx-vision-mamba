@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=64"]
-build-backend = "setuptools.backends._legacy:_Backend"
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlx-vision-mamba"
@@ -10,7 +10,16 @@ readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 authors = [{name = "Shinyoung Kang", email = "Shinyoung.kang.1@gmail.com"}]
+keywords = ["mlx", "mamba", "ssm", "vision", "apple-silicon", "metal", "3d", "medical-imaging"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = ["mlx>=0.20"]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/mlx-vision-mamba"
+Homepage = "https://github.com/shinyoungkang1/mlx-vision-mamba"
+Repository = "https://github.com/shinyoungkang1/mlx-vision-mamba"

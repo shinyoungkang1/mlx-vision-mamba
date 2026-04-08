@@ -116,8 +116,10 @@ FUSED_BWD_SOURCE = """
             ddelta_scan += dh[n] * h_prev * a_val * dA;  // through deltaA
             ddelta_scan += dh[n] * b_val * x_val;         // through deltaBx
 
-            // dA_param[ch, n] += dh * h_prev * delta * dA  (accumulated across t)
-            dA_out[ch * n_state + n] += dh[n] * h_prev * delta_val * dA;
+            // dA: store per-(batch, time, channel, state) for reduction in Python
+            // Cannot accumulate in-kernel: multiple batch threads race on dA_out[ch, n]
+            int da_idx = ((batch_idx * seq_len + t) * d_inner + ch) * n_state + n;
+            dA_partial[da_idx] = dh[n] * h_prev * delta_val * dA;
 
             // dB[b, t, n] = dh * delta * x
             // dB is (B, L, N) — per batch, per time, per state
@@ -186,11 +188,11 @@ def _launch_fused_bwd(x, delta, A, B, C, D, h_saved, dy):
         name="ssm_fused_bwd",
         input_names=["x_in", "delta_in", "A_param", "B_in", "C_in", "D_param",
                       "h_saved", "dy_in"],
-        output_names=["dx_out", "ddelta_out", "dA_out", "dB_partial", "dD_out"],
+        output_names=["dx_out", "ddelta_out", "dA_partial", "dB_partial", "dD_out"],
         source=FUSED_BWD_SOURCE,
     )
 
-    dx, ddelta, dA, dB_partial, dD_partial = kernel(
+    dx, ddelta, dA_partial, dB_partial, dD_partial = kernel(
         inputs=[x, delta, A, B, C, D, h_saved, dy],
         template=[
             ("batch_size", batch), ("seq_len", seq_len),
@@ -201,8 +203,8 @@ def _launch_fused_bwd(x, delta, A, B, C, D, h_saved, dy):
         output_shapes=[
             (batch, seq_len, d_inner),           # dx
             (batch, seq_len, d_inner),           # ddelta
-            (d_inner, n_state),                  # dA (accumulated across time and batch)
-            (batch, seq_len, d_inner, n_state),  # dB_partial (reduce d_inner later)
+            (batch, seq_len, d_inner, n_state),  # dA_partial (per batch/time/channel/state)
+            (batch, seq_len, d_inner, n_state),  # dB_partial
             (batch, d_inner),                    # dD_partial
         ],
         output_dtypes=[mx.float32] * 5,
@@ -211,31 +213,23 @@ def _launch_fused_bwd(x, delta, A, B, C, D, h_saved, dy):
     # Reduce dD across batch
     dD = dD_partial.sum(axis=0)
 
+    # Reduce dA across batch, time, and d_inner → (d_inner, n_state)
+    # dA_partial is (B, L, D_inner, N), need to sum over (B, L)
+    dA = dA_partial.sum(axis=(0, 1))  # (D_inner, N)
+
     # Reduce dB across d_inner: (B, L, D_inner, N) → (B, L, N)
     dB = dB_partial.sum(axis=2)
 
     # dC: dy[b,t,ch] * h[b,t,ch,n] summed over ch
     dC = (mx.expand_dims(dy, axis=-1) * h_saved).sum(axis=2)
 
-    # dA: accumulated in kernel across time, but need to reduce across batch
-    # Actually the kernel accumulates across time per-thread, but each thread
-    # is one (batch, ch) pair. Need to sum across batch.
-    # TODO: Fix — dA should be reduced across batch. For now use the per-batch-ch output.
-    # dA shape from kernel is (d_inner, n_state) but only accumulated for one batch item
-    # This is a known issue — fix with atomic add or reduce separately
-
     return dx, ddelta, dA, dB, dC, dD
-
-
-# Cache for h_saved
-_h_cache_fused = {}
 
 
 @mx.custom_function
 def _fused_scan_core(x, delta, A, B, C, D):
     """Fully-fused scan: discretize + scan + output in one Metal kernel."""
-    y, h_saved = _launch_fused_fwd(x, delta, A, B, C, D, save_h=True)
-    _h_cache_fused[id(y)] = h_saved
+    y, _h = _launch_fused_fwd(x, delta, A, B, C, D, save_h=True)
     return y
 
 
@@ -244,9 +238,10 @@ def _fused_scan_core_vjp(primals, cotangent, output):
     x, delta, A, B, C, D = primals
     dy = cotangent
 
-    h_saved = _h_cache_fused.pop(id(output), None)
-    if h_saved is None:
-        _, h_saved = _launch_fused_fwd(x, delta, A, B, C, D, save_h=True)
+    # Always recompute h_saved — caching is unsafe with multiple scan calls
+    # per layer (bidirectional/multi-directional blocks). Recomputation is
+    # fast since it's the same Metal kernel.
+    _, h_saved = _launch_fused_fwd(x, delta, A, B, C, D, save_h=True)
 
     dx, ddelta, dA, dB, dC, dD = _launch_fused_bwd(
         x, delta, A, B, C, D, h_saved, dy
