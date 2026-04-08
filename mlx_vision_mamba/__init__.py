@@ -18,7 +18,7 @@ from mlx_vision_mamba.mamba_metal import (
 )
 from mlx_vision_mamba.mamba_metal_fused import selective_scan_metal_fused
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = [
     "MambaBlock",
     "BidirectionalMambaBlock",

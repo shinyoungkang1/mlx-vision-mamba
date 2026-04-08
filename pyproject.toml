@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlx-vision-mamba"
-version = "0.1.0"
+version = "0.1.1"
 description = "Metal-accelerated Vision Mamba for Apple Silicon (2D/3D/4D)"
 readme = "README.md"
 license = {text = "Apache-2.0"}
